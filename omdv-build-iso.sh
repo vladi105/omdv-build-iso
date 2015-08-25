@@ -1,9 +1,9 @@
 #!/bin/bash
-#set -x
+
 # OpenMandriva Association 2012
 # Original author: Bernhard Rosenkraenzer <bero@lindev.ch>
-# Modified on 2014 by: Tomasz Pawe≈Ç Gajc <tpgxyz@gmail.com>
-# Modified on 2015 by: Tomasz Pawe≈Ç Gajc <tpgxyz@gmail.com>
+# Modified on 2014 by: Tomasz Pawe≥ Gajc <tpgxyz@gmail.com>
+# Modified on 2015 by: Tomasz Pawe≥ Gajc <tpgxyz@gmail.com>
 # Modified on 2015 by: Colin Close <itchka@compuserve.com>
 # Modified on 2015 by: Crispin Boylan <cris@beebgames.com>
 
@@ -181,25 +181,19 @@ fi
 # check whether script is executed inside ABF (www.abf.io)
 if echo $(realpath $(dirname $0)) | grep -q /home/vagrant; then
     ABF=1
-    OURDIR=$(realpath $(dirname $0))
-elif  [ -n $WORKDIR ]; then
-    # For local builds put the working directory containing.
-    # the package lists into the $WORKDIR if it is defined.
-    # or to the local default of the users $HOME so that they may.
-    # edit it when creating their own local spins.
-    WORKDIR="$UHOME"
-    echo "Working directory is $WORKDIR"
-    OURDIR="$WORKDIR"/omdv-build-iso-"$EXTARCH"
-else
-    OURDIR="$WORKDIR"/omdv-build-iso-"$EXTARCH"
-fi
 
-if  [ -d $WORKDIR/omdv-build-iso-$EXTARCH ]; then
-    echo "$OURDIR"
-else
-    mkdir -p "$OURDIR"
-    cp -r /usr/share/omdv-build-iso/* $OURDIR
-    chown -R $OLDUSER:$OLDUSER $OURDIR
+    if [ -n $NOCLEAN ]; then
+	echo "You cannot use --noclean inside ABF"
+	exit 1
+    fi
+
+    if [ -n $WORKDIR ]; then
+	echo "You cannot use --workdir inside ABF"
+	exit 1
+    fi
+
+    # hardcode workdir for ABF
+    WORKDIR=$(realpath $(dirname $0))
 fi
 
 # default definitions
@@ -219,16 +213,51 @@ SUDO="sudo -E"
 LOGDIR="."
 
 # set up main working directory if it was not set up
-if [ -z "$WORKDIR" ]; then
+if [ -z $WORKDIR ]; then
     if [ -z $ABF ]; then
-	WORKDIR=`mkdir -p "$UHOME"/omv-build-chroot-$EXTARCH`
-	echo This is the "$WORKDIR"
+	# set up working directory
+	WORKDIR="$UHOME/omdv-build-chroot-$EXTARCH"
+
+	# create working directory
+	if [ ! -d $WORKDIR ]; then
+	    $SUDO mkdir -p $WORKDIR
+	elif [ -z $NOCLEAN ]; then
+	    $SUDO rm -rf $WORKDIR
+	fi
+
+	# copy contents to the workdir
+	if [ -e /usr/share/omdv-build-iso ]; then
+	    $SUDO cp -r /usr/share/omdv-build-iso/* $WORKDIR
+	else
+	    echo "Directory /usr/share/omdv-build-iso does not exist. Please install omdv-build-iso"
+	    exit 1
+	fi
+
     else
+	# Yes we are inside ABF
 	WORKDIR="`mktemp -d /tmp/isobuildrootXXXXXX`"
     fi
+elif [ -n $WORKDIR ] && [ -z $ABF ]; then
+
+	# create working directory
+	if [ ! -d $WORKDIR ]; then
+	    $SUDO mkdir -p $WORKDIR
+	elif [ -z $NOCLEAN ]; then
+	    $SUDO rm -rf $WORKDIR
+	fi
+
+	# copy contents to the workdir
+	if [ -d /usr/share/omdv-build-iso ]; then
+	    $SUDO cp -r /usr/share/omdv-build-iso/* $WORKDIR
+	else
+	    echo "Directory /usr/share/omdv-build-iso does not exist. Please install omdv-build-iso"
+	    exit 1
+	fi
 fi
 
+# this is where rpm are installed
 CHROOTNAME="$WORKDIR"/BASE
+# this is where ISO image is prepared based on above
 ISOROOTNAME="$WORKDIR"/ISO
 
 # UUID Generation. xorriso needs a string of 16 asci digits.
@@ -291,7 +320,7 @@ updateSystem() {
 
 	# inside ABF, lxc-container which is used to run this script is based
 	# on Rosa2012 which does not have cdrtools
-	echo "Iinstalling rpms files"
+	echo "Installing rpms files"
 	$SUDO urpmi --downloader wget --wget-options --auth-no-challenge --auto --no-suggests --no-verify-rpm --ignorearch perl-URPM dosfstools grub2 xorriso syslinux squashfs-tools bc imagemagick gptfdisk kpartx --prefer /distro-theme-OpenMandriva-grub/ --prefer /distro-release-OpenMandriva/ --auto
     elif  [ ! -f "$CHROOTNAME"/.noclean ]; then
 	echo "Building in user custom environment will clean rpm cache"
@@ -315,18 +344,18 @@ getPkgList() {
     # we need to do this for ABF to ensure any edits have been included
     # Do we need to do this if people are using the tool locally?
 
-    if [ ! -d $OURDIR/iso-pkg-lists-$BRANCH ]; then
-	echo "Could not find $OURDIR/iso-pkg-lists-$BRANCH. Downloading from ABF."
+    if [ ! -d $WORKDIR/iso-pkg-lists-$BRANCH ]; then
+	echo "Could not find $WORKDIR/iso-pkg-lists-$BRANCH. Downloading from ABF."
 	# download iso packages lists from www.abf.io
 	PKGLIST="https://abf.io/openmandriva/iso-pkg-lists/archive/iso-pkg-lists-$BRANCH.tar.gz"
-	$SUDO  wget --tries=10 -O `echo "$OURDIR/iso-pkg-lists-$BRANCH.tar.gz"` --content-disposition $PKGLIST
-	$SUDO tar zxfC $OURDIR/iso-pkg-lists-$BRANCH.tar.gz $OURDIR
+	$SUDO  wget --tries=10 -O `echo "$WORKDIR/iso-pkg-lists-$BRANCH.tar.gz"` --content-disposition $PKGLIST
+	$SUDO tar zxfC $WORKDIR/iso-pkg-lists-$BRANCH.tar.gz $WORKDIR
 	# Why not retain the unique list name it will help when people want their own spins ?
 	$SUDO rm -f iso-pkg-lists-$BRANCH.tar.gz
    fi
 
     # export file list
-    FILELISTS="$OURDIR/iso-pkg-lists-$BRANCH/${DIST,,}-${TYPE,,}.lst"
+    FILELISTS="$WORKDIR/iso-pkg-lists-$BRANCH/${DIST,,}-${TYPE,,}.lst"
 
     if [ ! -e "$FILELISTS" ]; then
 	echo "$FILELISTS does not exists. Exiting"
@@ -350,6 +379,7 @@ showInfo() {
     fi
     echo "ISO label is $LABEL"
     echo "Build ID is $BUILD_ID"
+    echo "Working directory is $WORKDIR"
     echo $'###\n'
 }
 
@@ -480,22 +510,22 @@ createInitrd() {
 
     # build initrd for syslinux
     echo "Building liveinitrd-$BOOT_KERNEL_ISO for ISO boot"
-    if [ ! -f "$OURDIR"/dracut/dracut.conf.d/60-dracut-isobuild.conf ]; then
-	echo "Missing "$OURDIR"/dracut/dracut.conf.d/60-dracut-isobuild.conf . Exiting."
+    if [ ! -f "$WORKDIR"/dracut/dracut.conf.d/60-dracut-isobuild.conf ]; then
+	echo "Missing "$WORKDIR"/dracut/dracut.conf.d/60-dracut-isobuild.conf . Exiting."
 	errorCatch
     fi
 
-    $SUDO cp -f "$OURDIR"/dracut/dracut.conf.d/60-dracut-isobuild.conf "$CHROOTNAME"/etc/dracut.conf.d/60-dracut-isobuild.conf
+    $SUDO cp -f "$WORKDIR"/dracut/dracut.conf.d/60-dracut-isobuild.conf "$CHROOTNAME"/etc/dracut.conf.d/60-dracut-isobuild.conf
 
     if [ ! -d "$CHROOTNAME"/usr/lib/dracut/modules.d/90liveiso ]; then
 	echo "Dracut is missing 90liveiso module. Installing it."
 
-	if [ ! -d "$OURDIR"/dracut/90liveiso ]; then
-	    echo "Cant find 90liveiso dracut module in $OURDIR/dracut. Exiting."
+	if [ ! -d "$WORKDIR"/dracut/90liveiso ]; then
+	    echo "Cant find 90liveiso dracut module in $WORKDIR/dracut. Exiting."
 	    errorCatch
 	fi
 
-	$SUDO cp -a -f "$OURDIR"/dracut/90liveiso "$CHROOTNAME"/usr/lib/dracut/modules.d/
+	$SUDO cp -a -f "$WORKDIR"/dracut/90liveiso "$CHROOTNAME"/usr/lib/dracut/modules.d/
 	$SUDO chmod 0755 "$CHROOTNAME"/usr/lib/dracut/modules.d/90liveiso
 	$SUDO chmod 0755 "$CHROOTNAME"/usr/lib/dracut/modules.d/90liveiso/*.sh
     fi
@@ -553,9 +583,9 @@ createInitrd() {
 
 }
 
-createUEFI() {
 # Usage: createEFI <target_directory/image_name>.img <grub_support_files_directory> <grub2 efi executable>
 # Creates a fat formatted file ifilesystem image which will boot an UEFI system.
+createUEFI() {
 
     if [ $EXTARCH = "x86_64" ]; then
 	EFIARCH=X64
@@ -577,7 +607,7 @@ createUEFI() {
 
     if [ -e $IMGNME ]; then
 	$SUDO rm -rf $IMGNME
-	kpartx -d $IMGNME
+	$SUDO kpartx -d $IMGNME
     fi
 
     # Create the image.
@@ -593,7 +623,7 @@ createUEFI() {
     LDEV1=`losetup -f --show $IMGNME`
 
     # Add the fat partition
-    sgdisk -a 1 -n 1:34:"$EFIFILESIZE" -c 1:"EFI System Partition" -t 1:EF00 $LDEV1
+    $SUDO sgdisk -a 1 -n 1:34:"$EFIFILESIZE" -c 1:"EFI System Partition" -t 1:EF00 $LDEV1
     losetup -D
     sleep 1
 
@@ -601,24 +631,28 @@ createUEFI() {
     LDEV="/dev/mapper/`kpartx -avs $IMGNME | awk {'print $3'}`"
 
     # Then make the filesystem
-    mkfs.vfat -s 1 -S 512 $LDEV
-    mount -t vfat $LDEV /mnt
+    $SUDO mkfs.vfat -s 1 -S 512 $LDEV
+    $SUDO mount -t vfat $LDEV /mnt
 
     if [[ $? != 0 ]]; then
 	echo "Failed to mount UEFI image. Exiting."
 	errorCatch
     fi
 
-    # copy the files
-    mkdir -p /mnt/EFI/BOOT
-    cp -R $GRB2FLS/* /mnt/EFI/BOOT/
+    # copy the Grub2 files to the EFI image
+    if [ ! -e /mnt/EFI/BOOT ]; then
+	$SUDO mkdir -p /mnt/EFI/BOOT
+    else
+	$SUDO rm -rf /mnt/EFI/BOOT
+    fi
+    $SUDO cp -R $GRB2FLS/* /mnt/EFI/BOOT/
     echo "Made" >/mnt/EFI/BOOT/vnice
 
-    # Unmout the filesystem
+    # Unmout the filesystem with EFI image
     umount /mnt
 
     # Clean up
-    kpartx -d $IMGNME
+    $SUDO kpartx -d $IMGNME
 }
 
 # Usage: setupGrub2 /target/dir
@@ -636,11 +670,11 @@ setupGrub2() {
     GRUB_IMG=$(mktemp)
 
     mkdir -p "$2"/boot/grub "$2"/boot/grub/themes "$2"/boot/grub/locale "$2"/boot/grub/fonts
-    $SUDO cp -f "$OURDIR"/grub2/grub2-bios.cfg "$2"/boot/grub/grub.cfg
+    $SUDO cp -f "$WORKDIR"/grub2/grub2-bios.cfg "$2"/boot/grub/grub.cfg
     $SUDO sed -i -e "s/%GRUB_UUID%/${GRUB_UUID}/g" "$2"/boot/grub/grub.cfg
 
     # copy memtest
-    $SUDO cp -rfT $OURDIR/extraconfig/memtest "$2"/boot/grub/memtest
+    $SUDO cp -rfT $WORKDIR/extraconfig/memtest "$2"/boot/grub/memtest
     $SUDO chmod +x "$2"/boot/grub/memtest
 
     $SUDO cp -a -f "$1"/boot/grub2/themes "$2"/boot/grub/
@@ -664,11 +698,12 @@ setupGrub2() {
 
     # copy SuperGrub iso
     # do not copy it for now
-#    $SUDO cp -rfT $OURDIR/extraconfig/super_grub2_disk_i386_pc_2.00s2.iso "$2"/boot/grub/sgb.iso
+#    $SUDO cp -rfT $WORKDIR/extraconfig/super_grub2_disk_i386_pc_2.00s2.iso "$2"/boot/grub/sgb.iso
 
     XORRISO_OPTIONS=" -b boot/grub/grub-eltorito.img -no-emul-boot -boot-info-table -boot-load-size 4 -boot-info-table --protective-msdos-label --grub2-boot-info --grub2-mbr "$1"$GRUB_LIB/boot_hybrid.img --embedded-boot "$2"/boot/grub/grub-embedded.img "
 
     echo "End building Grub2 El-Torito image."
+
     echo "Installing liveinitrd for grub2"
 
     if [ -e "$1"/boot/vmlinuz-$BOOT_KERNEL_ISO ] && [ -e "$1"/boot/liveinitrd.img ]; then
@@ -694,13 +729,13 @@ setupGrub2() {
 	# For bootable iso's we may need grub.efi as BOOTX64.efi
 	if [ "$EXTARCH" = "x86_64" ]; then
 	    $SUDO cp -f "$1"/boot/efi/EFI/openmandriva/grub.efi "$2"/EFI/BOOT/BOOTX64.efi
-	    $SUDO cp -f "$OURDIR"/grub2/grub2-efi.cfg "$2"/EFI/BOOT/BOOTX64.cfg
+	    $SUDO cp -f "$WORKDIR"/grub2/grub2-efi.cfg "$2"/EFI/BOOT/BOOTX64.cfg
 	else
 	    $SUDO cp -f "$1"/boot/efi/EFI/openmandriva/grub.efi "$2"/EFI/BOOT/BOOTIA32.efi
-	    $SUDO cp -f $OURDIR/EFI/grub.cfg "$2"/EFI/BOOT/BOOTIA32.cfg
+	    $SUDO cp -f $WORKDIR/EFI/grub.cfg "$2"/EFI/BOOT/BOOTIA32.cfg
 	fi
 
-	$SUDO cp -f "$OURDIR"/grub2/grub2-efi.cfg "$2"/EFI/BOOT/grub.cfg
+	$SUDO cp -f "$WORKDIR"/grub2/grub2-efi.cfg "$2"/EFI/BOOT/grub.cfg
 	$SUDO cp -f "$1"/boot/efi/EFI/openmandriva/grub.efi "$2"/EFI/BOOT/grub.efi
 
 	$SUDO cp -a -f "$1"/boot/grub2/themes "$2"/EFI/BOOT/
@@ -773,14 +808,14 @@ setupSyslinux() {
 	$SUDO convert -depth 16 -resize 640x480 "$1"/usr/share/mdk/backgrounds/default.png "$2"/boot/syslinux/background.png
     else
 	echo "Could not find default.png in iso chroot, using default background for syslinux"
-	$SUDO cp -rfT $OURDIR/extraconfig/syslinux/background.png "$2"/boot/syslinux/background.png
+	$SUDO cp -rfT $WORKDIR/extraconfig/syslinux/background.png "$2"/boot/syslinux/background.png
     fi
 
     # copy memtest
-    $SUDO cp -rfT $OURDIR/extraconfig/memtest "$2"/boot/syslinux/memtest
+    $SUDO cp -rfT $WORKDIR/extraconfig/memtest "$2"/boot/syslinux/memtest
     $SUDO chmod +x "$2"/boot/syslinux/memtest
     # copy SuperGrub iso
-    $SUDO cp -rfT $OURDIR/extraconfig/super_grub2_disk_i386_pc_2.00s2.iso "$2"/boot/syslinux/sgb.iso
+    $SUDO cp -rfT $WORKDIR/extraconfig/super_grub2_disk_i386_pc_2.00s2.iso "$2"/boot/syslinux/sgb.iso
 
     # UEFI support
     if [ -f "$1"/boot/efi/EFI/openmandriva/grub.efi ]; then
@@ -793,11 +828,11 @@ setupSyslinux() {
 	    $SUDO cp -f "$1"/boot/efi/EFI/openmandriva/grub.efi "$2"/EFI/BOOT/BOOTX64.efi
 	else
 	    $SUDO cp -f "$1"/boot/efi/EFI/openmandriva/grub.efi "$2"/EFI/BOOT/BOOTIA32.efi
-	    $SUDO cp -f $OURDIR/EFI/grub.cfg "$2"/EFI/BOOT/BOOTIA32.cfg
+	    $SUDO cp -f $WORKDIR/EFI/grub.cfg "$2"/EFI/BOOT/BOOTIA32.cfg
 	fi
 
-	$SUDO cp -f $OURDIR/EFI/grub.cfg "$2"/boot/grub2/grub.cfg
-	$SUDO cp -f $OURDIR/EFI/grub.cfg "$2"/EFI/BOOT/grub.cfg
+	$SUDO cp -f $WORKDIR/EFI/grub.cfg "$2"/boot/grub2/grub.cfg
+	$SUDO cp -f $WORKDIR/EFI/grub.cfg "$2"/EFI/BOOT/grub.cfg
 	$SUDO cp -a -f "$1"/boot/grub2/themes "$2"/EFI/BOOT/
 	$SUDO cp -a -f "$1"/boot/grub2/locale "$2"/EFI/BOOT/
 	$SUDO sed -i -e "s/%GRUB_UUID%/${GRUB_UUID}/g" "$2"/boot/grub2/*.cfg
@@ -817,7 +852,7 @@ setupSyslinux() {
     echo "Create syslinux menu"
     # kernel/initrd filenames referenced below are the ISO9660 names.
     # syslinux doesn't support Rock Ridge.
-    $SUDO cp -rfT $OURDIR/extraconfig/syslinux/syslinux.cfg "$2"/boot/syslinux/syslinux.cfg
+    $SUDO cp -rfT $WORKDIR/extraconfig/syslinux/syslinux.cfg "$2"/boot/syslinux/syslinux.cfg
 
     # adjust syslinux config
     sed -i -e "s/%VERSION%/$VERSION/g" -e "s/%EXTARCH%/${EXTARCH}/g" -e "s/%TYPE%/${TYPE}/g" -e "s/%BUILD_ID%/BUILD ID: ${BUILD_ID}/g" -e "s/%LABEL%/${LABEL}/g" "$2"/boot/syslinux/syslinux.cfg
@@ -895,8 +930,8 @@ EOF
     fi
 
     # copy some extra config files
-    $SUDO cp -rfT $OURDIR/extraconfig/etc "$CHROOTNAME"/etc/
-    $SUDO cp -rfT $OURDIR/extraconfig/usr "$CHROOTNAME"/usr/
+    $SUDO cp -rfT $WORKDIR/extraconfig/etc "$CHROOTNAME"/etc/
+    $SUDO cp -rfT $WORKDIR/extraconfig/usr "$CHROOTNAME"/usr/
 
     # set up live user
     live_user=live
@@ -906,7 +941,7 @@ EOF
     $SUDO chroot "$CHROOTNAME" /bin/mkdir -p /home/${live_user}
     $SUDO chroot "$CHROOTNAME" /bin/cp -rfT /etc/skel /home/${live_user}/
     $SUDO chroot "$CHROOTNAME" /bin/mkdir /home/${live_user}/Desktop
-    $SUDO cp -rfT $OURDIR/extraconfig/etc/skel "$CHROOTNAME"/home/${live_user}/
+    $SUDO cp -rfT $WORKDIR/extraconfig/etc/skel "$CHROOTNAME"/home/${live_user}/
     $SUDO chroot "$CHROOTNAME" /bin/mkdir -p /home/${live_user}/.cache
     $SUDO chroot "$CHROOTNAME" /bin/chown -R ${live_user}:${live_user} /home/${live_user}
     $SUDO chroot "$CHROOTNAME" /bin/chown -R ${live_user}:${live_user} /home/${live_user}/Desktop
@@ -1138,7 +1173,7 @@ buildIso() {
     echo "Starting ISO build."
 
     if [ "$ABF" = "1" ]; then
-	ISOFILE="$OURDIR/$PRODUCT_ID.$EXTARCH.iso"
+	ISOFILE="$WORKDIR/$PRODUCT_ID.$EXTARCH.iso"
     elif [ -z "$OUTPUTDIR" ]; then
 	ISOFILE="/home/$OLDUSER/$PRODUCT_ID.$EXTARCH.iso"
     else
@@ -1188,13 +1223,13 @@ postBuild() {
     	# We're running in ABF adjust to its directory structure
 	# count checksums
 	echo "Genrating ISO checksums."
-	pushd $OURDIR
+	pushd $WORKDIR
 	    md5sum $PRODUCT_ID.$EXTARCH.iso > $PRODUCT_ID.$EXTARCH.iso.md5sum
 	    sha1sum $PRODUCT_ID.$EXTARCH.iso > $PRODUCT_ID.$EXTARCH.iso.sha1sum
 	popd
 
 	mkdir -p /home/vagrant/results /home/vagrant/archives
-	mv $OURDIR/*.iso* /home/vagrant/results/
+	mv $WORKDIR/*.iso* /home/vagrant/results/
     fi
 
     # clean chroot
@@ -1206,7 +1241,7 @@ postBuild() {
 
 showInfo
 updateSystem
-getPkgList $OURDIR
+getPkgList
 createChroot
 createInitrd
 setupBootloader
